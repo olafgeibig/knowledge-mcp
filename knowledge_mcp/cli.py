@@ -265,14 +265,15 @@ def main():
     parser.add_argument(
         "-c", "--config",
         type=str,
-        default="config.yml", # Consider making default relative to project root if cli is run from there
-        help="Path to the configuration file (default: config.yml)",
+        default=None,
+        required=False,
+        help="Path to the configuration file (config.yaml). If --base is also provided, --config takes precedence.",
     )
     parser.add_argument(
         "--base", "--kb-dir",
         type=str,
         required=False,
-        help="Base directory containing config.yaml (makes --config optional)."
+        help="Base directory containing config.yaml (makes --config optional). If provided, config.yaml is expected at <base>/config.yaml.",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True, help='Available modes: mcp, shell')
@@ -294,10 +295,7 @@ def main():
     args = parser.parse_args()
 
     # Determine config_path based on --config and --base
-    if args.config and args.base:
-        # Prefer --config for backward compatibility
-        config_path = args.config
-    elif args.config:
+    if args.config:
         config_path = args.config
     elif args.base:
         from pathlib import Path
