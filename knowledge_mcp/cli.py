@@ -4,13 +4,23 @@ import logging
 import logging.config
 import sys
 import warnings
+from pathlib import Path
 
 # Updated relative imports
 from knowledge_mcp.config import Config
-from knowledge_mcp.knowledgebases import KnowledgeBaseManager # Updated module name
-from knowledge_mcp.rag import RagManager # Updated module name
-from knowledge_mcp.shell import Shell # Updated module and class name
-from knowledge_mcp.mcp_server import MCP # Import class and mcp instance
+from knowledge_mcp.knowledgebases import (
+    KnowledgeBaseError,
+    KnowledgeBaseExistsError,
+    KnowledgeBaseManager,
+)
+from knowledge_mcp.rag import (
+    ConfigurationError,
+    RagManager,
+    RAGInitializationError,
+    RAGManagerError,
+)
+from knowledge_mcp.shell import Shell
+from knowledge_mcp.mcp_server import MCP
 
 logger = logging.getLogger(__name__)
 
@@ -253,14 +263,68 @@ def _cleanup_event_loop(loop):
 def run_query_mode(kb_name: str, query_text: str):
     """Runs a single query against the specified knowledge base (CLI mode)."""
     logger.info(f"Running query against KB '{kb_name}': {query_text}")
-    
+
     try:
         execute_query(kb_name, query_text)  # No async_task_runner = use CLI mode
     except Exception:
         sys.exit(1)
 
+
+def run_create_mode(name: str, description: str | None = None) -> None:
+    """Create a new knowledge base (CLI one-off)."""
+    kb_manager, rag_manager = initialize_components(Config.get_instance())
+    try:
+        kb_manager.create_kb(name, description=description)
+        print(f"Initializing RAG instance for '{name}'...")
+        asyncio.run(rag_manager.create_rag_instance(name))
+        print(f"Knowledge base '{name}' created and RAG instance initialized successfully.")
+    except KnowledgeBaseExistsError:
+        print(f"Error: Knowledge base '{name}' already exists.")
+        sys.exit(1)
+    except KnowledgeBaseError as e:
+        print(f"Error creating knowledge base '{name}': {e}", file=sys.stderr)
+        sys.exit(1)
+    except (RAGInitializationError, ConfigurationError, RAGManagerError) as e:
+        logger.warning("KB created but RAG initialization failed: %s", e)
+        print(f"Warning: Knowledge base '{name}' created, but RAG initialization failed: {e}")
+        print("You may need to configure LLM/Embedding settings before using this KB.")
+
+
+def run_list_mode() -> None:
+    """List all knowledge bases (CLI one-off)."""
+    kb_manager, _ = initialize_components(Config.get_instance())
+    try:
+        kbs_with_desc = asyncio.run(kb_manager.list_kbs())
+    except Exception as e:
+        logger.exception("Error listing knowledge bases")
+        print(f"Error listing knowledge bases: {e}")
+        sys.exit(1)
+    if not kbs_with_desc:
+        print("No knowledge bases found.")
+        return
+    print("Available knowledge bases:")
+    max_len = max(len(n) for n in kbs_with_desc.keys())
+    for n, desc in kbs_with_desc.items():
+        print(f"- {n:<{max_len}} : {desc}")
+
 def main():
     """Main entry point for the application."""
+    # Phase 1: extract --config and --base first so they work the same before the subcommand
+    # (avoids argparse consuming a path like /app/kb as the subcommand when invoked as
+    # uvx knowledge-mcp --base /app/kb shell)
+    pre_parser = argparse.ArgumentParser()
+    pre_parser.add_argument("-c", "--config", type=str, default=None)
+    pre_parser.add_argument("--base", "--kb-dir", dest="base", type=str, default=None)
+    pre_args, unknown = pre_parser.parse_known_args()
+
+    # Normalize argv: optionals first, then subcommand and its args
+    argv = [sys.argv[0]]
+    if pre_args.config is not None:
+        argv.extend(["--config", pre_args.config])
+    if pre_args.base is not None:
+        argv.extend(["--base", pre_args.base])
+    argv.extend(unknown)
+
     parser = argparse.ArgumentParser(description="Knowledge Base MCP Server and Management Shell")
     parser.add_argument(
         "-c", "--config",
@@ -273,7 +337,8 @@ def main():
         "--base", "--kb-dir",
         type=str,
         required=False,
-        help="Base directory containing config.yaml (makes --config optional). If provided, config.yaml is expected at <base>/config.yaml.",
+        dest="base",
+        help="Base directory containing config.yaml (makes --config optional)",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True, help='Available modes: mcp, shell')
@@ -285,25 +350,58 @@ def main():
     # Shell command
     parser_shell = subparsers.add_parser("shell", help="Run the interactive management shell")
     parser_shell.set_defaults(func=run_shell_mode)
-    
+
     # Query command
     parser_query = subparsers.add_parser("query", help="Query a knowledge base")
     parser_query.add_argument("kb_name", help="Name of the knowledge base to query")
     parser_query.add_argument("query_text", help="Query text to search for")
     parser_query.set_defaults(func=lambda: run_query_mode(args.kb_name, args.query_text))
 
-    args = parser.parse_args()
+    # Create command (one-off, for Docker etc.)
+    parser_create = subparsers.add_parser("create", help="Create a new knowledge base")
+    parser_create.add_argument("name", help="Name of the knowledge base")
+    parser_create.add_argument(
+        "description",
+        nargs="?",
+        default=None,
+        help="Optional description",
+    )
+    parser_create.set_defaults(
+        func=lambda: run_create_mode(args.name, getattr(args, "description", None))
+    )
+
+    # List command (one-off, for Docker etc.)
+    parser_list = subparsers.add_parser("list", help="List all knowledge bases")
+    parser_list.set_defaults(func=run_list_mode)
+
+    try:
+        args = parser.parse_args(argv[1:])
+    except SystemExit as e:
+        # When user passes a path as first arg (e.g. uvx knowledge-mcp /app/kb shell),
+        # argparse reports "invalid choice: '/app/kb'". Hint to use --base or --config.
+        if e.code != 0 and unknown and len(unknown) >= 1:
+            val = unknown[0]
+            if "/" in val or "\\" in val:
+                print(
+                    "knowledge-mcp: Use --base <dir> or --config <file> before the command, "
+                    "e.g. knowledge-mcp --base /app/kb shell",
+                    file=sys.stderr,
+                )
+        raise
 
     # Determine config_path based on --config and --base
-    if args.config:
-        config_path = args.config
-    elif args.base:
-        from pathlib import Path
-        config_path = Path(args.base) / "config.yaml"
-        if not config_path.exists():
-            raise ValueError(f"config.yaml not found in {args.base}")
-    else:
-        raise ValueError("Either --config or --base must be provided")
+    try:
+        if args.config:
+            config_path = args.config
+        elif args.base:
+            config_path = Path(args.base) / "config.yaml"
+            if not config_path.exists():
+                raise ValueError(f"config.yaml not found in {args.base}")
+        else:
+            raise ValueError("Either --config or --base must be provided")
+    except ValueError as e:
+        print(f"knowledge-mcp: {e}", file=sys.stderr)
+        sys.exit(1)
 
     # Load config - config path might need adjustment depending on CWD
     # If config is expected relative to project root, and cli.py is in the package,

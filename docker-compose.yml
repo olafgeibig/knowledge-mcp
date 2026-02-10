@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  knowledge-mcp:
+    build: .
+    container_name: knowledge-mcp
+    volumes:
+      - ~/kb:/app/kb   # edit this path to your host knowledge-base directory
+    working_dir: /app/kb
+    command: mcp   # default = run MCP server (override: shell, create mykb, list, etc.)

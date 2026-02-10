@@ -31,8 +31,9 @@ Ensure you have Python 3.12 and `uv` installed.
 
 1.  **Running the Tool:** After installing the package (e.g., using `uv pip install -e .`), you can run the CLI using `uvx`:
     ```bash
-    # General command structure
+    # General command structure (use either --config or --base)
     uvx knowledge-mcp --config <path-to-your-config.yaml> <command> [arguments...]
+    uvx knowledge-mcp --base <path-to-dir-containing-config.yaml> <command> [arguments...]
 
     # Example: Start interactive shell
     uvx knowledge-mcp --config <path-to-your-config.yaml> shell
@@ -55,14 +56,85 @@ Ensure you have Python 3.12 and `uv` installed.
     }
     ```
 
+    **MCP Client Configuration (Docker)**  
+    For clients like Claude Desktop, Cursor, Windsurf, etc.:
+
+    **Spawn new container per request** (simplest):
+    ```json
+    {
+      "mcpServers": {
+        "knowledge-mcp": {
+          "command": "docker",
+          "args": [
+            "run",
+            "--rm",
+            "-v",
+            "/Users/yourusername/kb:/app/kb",
+            "knowledge-mcp"
+          ]
+        }
+      }
+    }
+    ```
+    This runs `knowledge-mcp --base /app/kb mcp` inside the container.
+
+    **Persistent server** (better for frequent use):
+    ```bash
+    docker run -d --name knowledge-mcp-server -v ~/kb:/app/kb knowledge-mcp
+    ```
+    Then configure your client to connect to the running instance if it supports that.
+
 3.  **Set up configuration:**
     *   Copy `config.example.yaml` to `config.yaml`.
     *   Copy `.env.example` to `.env`.
     *   Edit `config.yaml` and `.env` to add your API keys (e.g., `OPENAI_API_KEY`) and adjust paths or settings as needed. The `knowledge_base.base_dir` in `config.yaml` specifies where your knowledge base directories will be created.
 
+### Docker Setup & Usage
+
+#### Build the image
+```bash
+docker build -t knowledge-mcp .
+```
+
+#### Quick commands (with mounted knowledge base)
+Start persistent MCP server:
+```bash
+docker run -d --name knowledge-mcp -v ~/kb:/app/kb knowledge-mcp
+```
+
+Run one-off commands:
+```bash
+docker run -it --rm -v ~/kb:/app/kb knowledge-mcp shell
+docker run -it --rm -v ~/kb:/app/kb knowledge-mcp create my-notes
+docker run --rm -v ~/kb:/app/kb knowledge-mcp list
+```
+
+#### Using docker-compose (recommended)
+Edit `docker-compose.yml` to point the volume to your real folder, then:
+```bash
+docker compose up -d
+docker compose down
+docker compose logs -f
+
+docker compose run --rm knowledge-mcp create work-kb
+docker compose run --rm knowledge-mcp shell
+```
+
+#### Required host setup
+```bash
+mkdir -p ~/kb
+cp config.example.yaml ~/kb/config.yaml
+cp .env.example ~/kb/.env
+```
+Then edit:
+- `~/kb/config.yaml` → set `knowledge_base.base_dir: /app/kb`
+- `~/kb/.env` → add your `OPENAI_API_KEY`
+
 ## 4. Configuration
 
-Configuration is managed via YAML files:
+Configuration is managed via YAML files.
+
+When using Docker, set `knowledge_base.base_dir: /app/kb` in your config.yaml (the one you mount from your host).
 
 1.  **Main Configuration (`config.yaml`):** Defines global settings like the knowledge base directory (`knowledge_base.base_dir`), LightRAG parameters (LLM provider/model, embedding provider/model, API keys via `${ENV_VAR}` substitution), and logging settings. Refer to `config.example.yaml` for the full structure and available options.
 
@@ -239,7 +311,7 @@ knowledge-mcp --config config.yaml query my_kb "What are the main concepts?"
 
 The primary way to interact with `knowledge-mcp` is through its CLI, accessed via the `knowledge-mcp` command (if installed globally or via `uvx knowledge-mcp` within the activated venv).
 
-**All commands require the `--config` option pointing to your main configuration file.**
+**All commands require either `--config <path-to-config.yaml>` or `--base <directory-containing-config.yaml>` (e.g. Docker uses `--base /app/kb`).**
 
 ```bash
 uv run knowledge-mcp --config /path/to/config.yaml shell
