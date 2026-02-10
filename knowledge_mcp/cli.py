@@ -268,6 +268,12 @@ def main():
         default="config.yml", # Consider making default relative to project root if cli is run from there
         help="Path to the configuration file (default: config.yml)",
     )
+    parser.add_argument(
+        "--base", "--kb-dir",
+        type=str,
+        required=False,
+        help="Base directory containing config.yaml (makes --config optional)."
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True, help='Available modes: mcp, shell')
 
@@ -287,6 +293,20 @@ def main():
 
     args = parser.parse_args()
 
+    # Determine config_path based on --config and --base
+    if args.config and args.base:
+        # Prefer --config for backward compatibility
+        config_path = args.config
+    elif args.config:
+        config_path = args.config
+    elif args.base:
+        from pathlib import Path
+        config_path = Path(args.base) / "config.yaml"
+        if not config_path.exists():
+            raise ValueError(f"config.yaml not found in {args.base}")
+    else:
+        raise ValueError("Either --config or --base must be provided")
+
     # Load config - config path might need adjustment depending on CWD
     # If config is expected relative to project root, and cli.py is in the package,
     # we might need to adjust how the default path is handled or make it absolute.
@@ -295,13 +315,13 @@ def main():
         # If config is expected relative to project root, and cli.py is in the package,
         # we might need to adjust how the default path is handled or make it absolute.
         # For now, assume it's run from project root or path is absolute.
-        Config.load(args.config)
+        Config.load(config_path)
         # Configure logging AFTER config is loaded
         configure_logging() 
-        logger.info(f"Successfully loaded config from {args.config}")
+        logger.info(f"Successfully loaded config from {config_path}")
     except FileNotFoundError:
         # Try searching relative to the cli script's parent dir? Or require absolute path?
-        logger.error(f"Configuration file not found at {args.config}. Please provide a valid path.")
+        logger.error(f"Configuration file not found at {config_path}. Please provide a valid path.")
         sys.exit(1)
     except (ValueError, RuntimeError) as e:
         logger.critical(f"Failed to load or validate configuration: {e}")
