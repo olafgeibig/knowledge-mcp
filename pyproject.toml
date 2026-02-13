@@ -1,6 +1,6 @@
 [project]
 name = "knowledge-mcp"
-version = "0.4.1"
+version = "0.4.2"
 description = "A MCP server designed to bridge the gap between specialized knowledge domains and AI assistants."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -24,7 +24,7 @@ classifiers = [
 dependencies = [
     "fastmcp>=2.2.1",
     "graspologic>=3.4.1",
-    "lightrag-hku[api]>=1.4.0",
+    "lightrag-hku[api]>=1.4.9.11",
     "markitdown[all,pdf]>=0.1.2",
     "mineru>=2.0.6",
     "nano-vectordb>=0.0.4.3",
@@ -75,6 +75,7 @@ dev = [
     "hatch>=1.14.1",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
+    "pytest-cov>=7.0.0",
     "twine>=6.1.0",
 ]
 
