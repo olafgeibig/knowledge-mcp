@@ -77,15 +77,17 @@ async def vision_model_func(prompt, system_prompt=None, history_messages=[], ima
         )
 
 async def openai_embedding_func(texts: list[str]) -> np.ndarray:
-    embedding_model = Config.get_instance().lightrag.embedding.model_name
-    
-    # Call the OpenAI embed function with all the parameters
-    return await openai_embed(
-        texts=texts,
-        model=embedding_model,
-        api_key=Config.get_instance().lightrag.embedding.api_key,
-        base_url=Config.get_instance().lightrag.embedding.api_base,
-    )
+    # Call the OpenAI-compatible embeddings endpoint directly instead of going
+    # through lightrag.llm.openai.openai_embed, which is decorated with
+    # @wrap_embedding_func_with_attrs(embedding_dim=1536) and therefore pins
+    # the dimension to OpenAI text-embedding-3-*. Going direct lets the caller
+    # use any model (Ollama bge-m3 at 1024, mxbai-embed-large, etc.); the
+    # EmbeddingFunc wrapper below still validates the configured dimension.
+    cfg = Config.get_instance().lightrag.embedding
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(api_key=cfg.api_key, base_url=cfg.api_base)
+    response = await client.embeddings.create(model=cfg.model_name, input=texts)
+    return np.array([item.embedding for item in response.data])
 
 # Wrap the embedding function with the correct attributes from config
 embedding_func = EmbeddingFunc(

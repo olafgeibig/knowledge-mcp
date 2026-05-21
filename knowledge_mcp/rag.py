@@ -135,8 +135,7 @@ class RagManager:
                 working_dir=str(kb_path),
                 llm_model_func=llm_func,
                 llm_model_kwargs=llm_kwargs,
-                llm_model_name=llm_config.model_name, 
-                llm_model_max_token_size=llm_model_max_tokens,
+                llm_model_name=llm_config.model_name,
                 embedding_func=embed_func,
                 embedding_cache_config={
                     "enabled": cache_config.enabled,
@@ -248,7 +247,12 @@ class RagManager:
 
             # Ensure 'description' is not passed as a query param
             final_query_params.pop("description", None)
-            
+
+            # Filter out kwargs that older per-KB configs may still emit but
+            # which were removed from lightrag-hku's QueryParam in 1.4.x.
+            for stale_kwarg in ("ids", "model_func", "chunk_top_k", "enable_rerank"):
+                final_query_params.pop(stale_kwarg, None)
+
             # Handle user_prompt: only include if not empty
             user_prompt_value = final_query_params.get('user_prompt', '')
             if not (user_prompt_value and user_prompt_value.strip()):
